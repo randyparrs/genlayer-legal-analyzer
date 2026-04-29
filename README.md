@@ -1,4 +1,4 @@
-# GenLayer IA Legal Contract Analyzer
+# GenLayer AI Legal Contract Analyzer
 
 A decentralized legal contract analyzer where AI validators read the actual contract content and identify risks, problematic clauses, and which party the agreement favors. Built on GenLayer Testnet Bradbury.
 
