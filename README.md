@@ -1,65 +1,254 @@
-# GenLayer AI Legal Contract Analyzer
+# { "Depends": "py-genlayer:test" }
 
-A decentralized legal contract analyzer where AI validators read the actual contract content and identify risks, problematic clauses, and which party the agreement favors. Built on GenLayer Testnet Bradbury.
+import json
+from genlayer import *
 
----
 
-## What is this
+class LegalAnalyzer(gl.Contract):
 
-Reading a legal contract and understanding the risks is something most people cannot do without hiring a lawyer. I built this to explore whether AI validators on GenLayer could analyze real contract content from a URL and give a structured risk assessment that lives onchain, verified by multiple independent validators before being committed.
+    owner: Address
+    analysis_counter: u256
+    analysis_data: DynArray[str]
 
-The interesting part is that the AI reads the actual document, not a description of it. You submit a URL pointing to the contract, the contract fetches the content, and the AI evaluates it against whatever focus you specify, whether that is payment terms, liability clauses, intellectual property, or anything else.
+    def __init__(self, owner_address: Address):
+        self.owner = owner_address
+        self.analysis_counter = u256(0)
 
----
+    @gl.public.view
+    def get_analysis(self, analysis_id: str) -> str:
+        title = self._get(analysis_id, "title")
+        if not title:
+            return "Analysis not found"
+        return (
+            f"ID: {analysis_id} | "
+            f"Title: {title} | "
+            f"Status: {self._get(analysis_id, 'status')} | "
+            f"Risk Level: {self._get(analysis_id, 'risk_level')} | "
+            f"Favorable For: {self._get(analysis_id, 'favorable_for')} | "
+            f"Financial Risk: {self._get(analysis_id, 'financial_risk')} | "
+            f"Liability Risk: {self._get(analysis_id, 'liability_risk')} | "
+            f"IP Risk: {self._get(analysis_id, 'ip_risk')} | "
+            f"Termination Risk: {self._get(analysis_id, 'termination_risk')} | "
+            f"Red Flags: {self._get(analysis_id, 'red_flags')} | "
+            f"Recommendations: {self._get(analysis_id, 'recommendations')} | "
+            f"Summary: {self._get(analysis_id, 'summary')}"
+        )
 
-## How it works
+    @gl.public.view
+    def get_analysis_count(self) -> u256:
+        return self.analysis_counter
 
-You submit a contract for analysis by providing a title, the names of both parties, a URL pointing to the contract document, and a focus describing what aspects to analyze. The contract fetches that URL and an AI legal analyst evaluates the content. It identifies the overall risk level, determines which party the contract favors, flags any problematic clauses, and produces a summary of the key terms.
+    @gl.public.view
+    def get_summary(self) -> str:
+        return (
+            f"GenLayer AI Legal Contract Analyzer v2\n"
+            f"Total Analyses: {int(self.analysis_counter)}"
+        )
 
-Multiple validators independently read the same contract and run the same analysis. They must agree on both the risk level and which party is favored before the result is committed onchain. This means the analysis is not just one AI's opinion but a consensus across several independent evaluations.
+    @gl.public.write
+    def submit_contract(
+        self,
+        title: str,
+        party_a: str,
+        party_b: str,
+        contract_url: str,
+        analysis_focus: str,
+    ) -> str:
+        assert len(title) >= 5, "Title too short"
+        assert len(contract_url) >= 10, "Contract URL too short"
+        assert len(analysis_focus) >= 10, "Analysis focus too short"
 
----
+        analysis_id = str(int(self.analysis_counter))
+        caller = str(gl.message.sender_address)
 
-## Functions
+        self._set(analysis_id, "title", title)
+        self._set(analysis_id, "party_a", party_a)
+        self._set(analysis_id, "party_b", party_b)
+        self._set(analysis_id, "contract_url", contract_url)
+        self._set(analysis_id, "analysis_focus", analysis_focus[:300])
+        self._set(analysis_id, "submitter", caller)
+        self._set(analysis_id, "status", "pending")
+        self._set(analysis_id, "risk_level", "")
+        self._set(analysis_id, "favorable_for", "")
+        self._set(analysis_id, "financial_risk", "")
+        self._set(analysis_id, "liability_risk", "")
+        self._set(analysis_id, "ip_risk", "")
+        self._set(analysis_id, "termination_risk", "")
+        self._set(analysis_id, "red_flags", "")
+        self._set(analysis_id, "recommendations", "")
+        self._set(analysis_id, "summary", "")
 
-submit_contract takes a title, the names of Party A and Party B, a URL pointing to the contract, and an analysis focus describing what to look for.
+        self.analysis_counter = u256(int(self.analysis_counter) + 1)
+        return f"Contract {analysis_id} submitted for analysis: {title}"
 
-analyze takes an analysis id and triggers the AI evaluation through Optimistic Democracy. The AI fetches the contract URL, reads the content, and produces a structured risk assessment.
+    @gl.public.write
+    def analyze(self, analysis_id: str) -> str:
+        assert self._get(analysis_id, "status") == "pending", "Analysis is not pending"
 
-get_analysis shows the full result including risk level, which party is favored, the main red flag identified, and a summary of the key terms.
+        title = self._get(analysis_id, "title")
+        party_a = self._get(analysis_id, "party_a")
+        party_b = self._get(analysis_id, "party_b")
+        contract_url = self._get(analysis_id, "contract_url")
+        analysis_focus = self._get(analysis_id, "analysis_focus")
 
-get_summary shows the total number of analyses performed.
+        def leader_fn():
+            web_data = ""
+            try:
+                response = gl.nondet.web.get(contract_url)
+                raw = response.body.decode("utf-8")
+                web_data = raw[:4000]
+            except Exception:
+                web_data = "Could not fetch contract content."
 
----
+            prompt = f"""You are a senior legal analyst specializing in contract law.
+Your task is to perform a structured multi-category risk analysis on the contract below.
 
-## Test results
+Contract Title: {title}
+Party A: {party_a}
+Party B: {party_b}
+User-defined analysis focus: {analysis_focus}
 
-First test submitted a Software Development Service Agreement using a URL that returned a 404 error. The AI correctly identified that the content was missing, flagged this as HIGH risk since no actual clauses could be reviewed, and reported it as Balanced since it could not determine favorability without the contract text. This shows the system is honest when evidence is insufficient rather than making up an analysis.
+Contract content from {contract_url}:
+{web_data}
 
-Second test submitted the GNU General Public License version 3 using the official text file from gnu.org. The AI returned a MEDIUM risk level and Balanced favorability. The main red flag identified was the copyleft requirement that forces Party B to release any modifications under the same license terms if they distribute the software. The summary accurately described the tradeoff between the extensive freedoms granted and the strict source code disclosure obligations imposed on derivative works.
+Perform a structured analysis evaluating each of these four categories independently.
 
----
+CATEGORY 1 - FINANCIAL TERMS
+Look for: payment schedules, late payment penalties, currency clauses, escalation rights,
+hidden fees, refund obligations, and price modification rights.
+Question: Are the financial terms balanced or do they expose one party to disproportionate financial risk?
 
-## How to run it
+CATEGORY 2 - LIABILITY AND INDEMNIFICATION
+Look for: liability caps, indemnification clauses, warranty disclaimers, exclusions of damages,
+force majeure provisions, and insurance requirements.
+Question: Does either party bear unlimited or unfair liability exposure?
 
-Go to GenLayer Studio at https://studio.genlayer.com and create a new file called legal_analyzer.py. Paste the contract code and set execution mode to Normal Full Consensus. Deploy with your address as owner_address.
+CATEGORY 3 - INTELLECTUAL PROPERTY RIGHTS
+Look for: ownership of work product, license grants, copyleft requirements, derivative works,
+patent obligations, confidentiality clauses, and trademark usage.
+Question: Are IP rights clearly assigned and do they restrict either party unreasonably?
 
-Follow this order and wait for FINALIZED at each step. Run get_summary first, then submit_contract with your contract details, then get_analysis to confirm it is pending, then analyze to trigger the AI evaluation, then get_analysis again to see the full result.
+CATEGORY 4 - TERMINATION AND DISPUTE RESOLUTION
+Look for: termination conditions, notice periods, post-termination obligations, dispute resolution
+mechanisms, governing law, and jurisdiction clauses.
+Question: Can either party exit the agreement fairly and how are disputes handled?
 
-For best results use URLs that point directly to plain text or simple HTML documents. PDF files and pages that require JavaScript to render may not return usable content.
+For each category assign a risk score using these criteria:
+LOW means the clauses are balanced and standard for this type of agreement.
+MEDIUM means there are some unusual clauses that warrant attention but are not deal-breakers.
+HIGH means there are clauses that expose one party to significant or disproportionate risk.
 
-Note: the contract in this repository uses the Address type in the constructor as required by genvm-lint. When deploying in GenLayer Studio use a version that receives str in the constructor and converts internally with Address(owner_address) since Studio requires primitive types to parse the contract schema correctly.
+Respond ONLY with this JSON:
+{{
+  "risk_level": "MEDIUM",
+  "favorable_for": "Party A",
+  "financial_risk": "LOW",
+  "liability_risk": "MEDIUM",
+  "ip_risk": "HIGH",
+  "termination_risk": "LOW",
+  "red_flags": "one sentence describing the single most critical issue across all categories",
+  "recommendations": "one sentence describing the most important change to negotiate",
+  "summary": "two sentences summarizing the overall balance and main concerns"
+}}
 
----
+risk_level is the overall risk and must be exactly LOW, MEDIUM, or HIGH.
+favorable_for must be exactly Party A, Party B, or Balanced.
+Each category risk must be exactly LOW, MEDIUM, or HIGH.
+No extra text."""
 
-## Resources
+            result = gl.nondet.exec_prompt(prompt)
+            clean = result.strip().replace("```json", "").replace("```", "").strip()
+            data = json.loads(clean)
 
-GenLayer Docs: https://docs.genlayer.com
+            risk_level = data.get("risk_level", "MEDIUM")
+            favorable_for = data.get("favorable_for", "Balanced")
+            financial_risk = data.get("financial_risk", "MEDIUM")
+            liability_risk = data.get("liability_risk", "MEDIUM")
+            ip_risk = data.get("ip_risk", "MEDIUM")
+            termination_risk = data.get("termination_risk", "MEDIUM")
+            red_flags = data.get("red_flags", "")
+            recommendations = data.get("recommendations", "")
+            summary = data.get("summary", "")
 
-Optimistic Democracy: https://docs.genlayer.com/understand-genlayer-protocol/core-concepts/optimistic-democracy
+            valid_risks = ("LOW", "MEDIUM", "HIGH")
+            if risk_level not in valid_risks:
+                risk_level = "MEDIUM"
+            if financial_risk not in valid_risks:
+                financial_risk = "MEDIUM"
+            if liability_risk not in valid_risks:
+                liability_risk = "MEDIUM"
+            if ip_risk not in valid_risks:
+                ip_risk = "MEDIUM"
+            if termination_risk not in valid_risks:
+                termination_risk = "MEDIUM"
+            if favorable_for not in ("Party A", "Party B", "Balanced"):
+                favorable_for = "Balanced"
 
-Equivalence Principle: https://docs.genlayer.com/understand-genlayer-protocol/core-concepts/optimistic-democracy/equivalence-principle
+            return json.dumps({
+                "risk_level": risk_level,
+                "favorable_for": favorable_for,
+                "financial_risk": financial_risk,
+                "liability_risk": liability_risk,
+                "ip_risk": ip_risk,
+                "termination_risk": termination_risk,
+                "red_flags": red_flags,
+                "recommendations": recommendations,
+                "summary": summary
+            }, sort_keys=True)
 
-GenLayer Studio: https://studio.genlayer.com
+        def validator_fn(leader_result) -> bool:
+            if not isinstance(leader_result, gl.vm.Return):
+                return False
+            try:
+                validator_raw = leader_fn()
+                leader_data = json.loads(leader_result.calldata)
+                validator_data = json.loads(validator_raw)
+                if leader_data["risk_level"] != validator_data["risk_level"]:
+                    return False
+                if leader_data["favorable_for"] != validator_data["favorable_for"]:
+                    return False
+                return True
+            except Exception:
+                return False
 
-Discord: https://discord.gg/8Jm4v89VAu
+        raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+        data = json.loads(raw)
+
+        self._set(analysis_id, "status", "analyzed")
+        self._set(analysis_id, "risk_level", data["risk_level"])
+        self._set(analysis_id, "favorable_for", data["favorable_for"])
+        self._set(analysis_id, "financial_risk", data["financial_risk"])
+        self._set(analysis_id, "liability_risk", data["liability_risk"])
+        self._set(analysis_id, "ip_risk", data["ip_risk"])
+        self._set(analysis_id, "termination_risk", data["termination_risk"])
+        self._set(analysis_id, "red_flags", data["red_flags"])
+        self._set(analysis_id, "recommendations", data["recommendations"])
+        self._set(analysis_id, "summary", data["summary"])
+
+        return (
+            f"Analysis {analysis_id} complete. "
+            f"Overall Risk: {data['risk_level']}. "
+            f"Favorable for: {data['favorable_for']}. "
+            f"Financial: {data['financial_risk']} | "
+            f"Liability: {data['liability_risk']} | "
+            f"IP: {data['ip_risk']} | "
+            f"Termination: {data['termination_risk']}. "
+            f"Red Flags: {data['red_flags']}. "
+            f"Recommendations: {data['recommendations']}. "
+            f"{data['summary']}"
+        )
+
+    def _get(self, analysis_id: str, field: str) -> str:
+        key = f"{analysis_id}_{field}:"
+        for i in range(len(self.analysis_data)):
+            if self.analysis_data[i].startswith(key):
+                return self.analysis_data[i][len(key):]
+        return ""
+
+    def _set(self, analysis_id: str, field: str, value: str) -> None:
+        key = f"{analysis_id}_{field}:"
+        for i in range(len(self.analysis_data)):
+            if self.analysis_data[i].startswith(key):
+                self.analysis_data[i] = f"{key}{value}"
+                return
+        self.analysis_data.append(f"{key}{value}")
