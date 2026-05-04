@@ -10,8 +10,8 @@ class LegalAnalyzer(gl.Contract):
     analysis_counter: u256
     analysis_data: DynArray[str]
 
-    def __init__(self, owner_address: Address):
-        self.owner = owner_address
+    def __init__(self, owner_address: str):
+        self.owner = Address(owner_address)
         self.analysis_counter = u256(0)
 
     @gl.public.view
@@ -25,7 +25,12 @@ class LegalAnalyzer(gl.Contract):
             f"Status: {self._get(analysis_id, 'status')} | "
             f"Risk Level: {self._get(analysis_id, 'risk_level')} | "
             f"Favorable For: {self._get(analysis_id, 'favorable_for')} | "
+            f"Financial Risk: {self._get(analysis_id, 'financial_risk')} | "
+            f"Liability Risk: {self._get(analysis_id, 'liability_risk')} | "
+            f"IP Risk: {self._get(analysis_id, 'ip_risk')} | "
+            f"Termination Risk: {self._get(analysis_id, 'termination_risk')} | "
             f"Red Flags: {self._get(analysis_id, 'red_flags')} | "
+            f"Recommendations: {self._get(analysis_id, 'recommendations')} | "
             f"Summary: {self._get(analysis_id, 'summary')}"
         )
 
@@ -36,7 +41,7 @@ class LegalAnalyzer(gl.Contract):
     @gl.public.view
     def get_summary(self) -> str:
         return (
-            f"GenLayer AI Legal Contract Analyzer\n"
+            f"GenLayer AI Legal Contract Analyzer v2\n"
             f"Total Analyses: {int(self.analysis_counter)}"
         )
 
@@ -65,7 +70,12 @@ class LegalAnalyzer(gl.Contract):
         self._set(analysis_id, "status", "pending")
         self._set(analysis_id, "risk_level", "")
         self._set(analysis_id, "favorable_for", "")
+        self._set(analysis_id, "financial_risk", "")
+        self._set(analysis_id, "liability_risk", "")
+        self._set(analysis_id, "ip_risk", "")
+        self._set(analysis_id, "termination_risk", "")
         self._set(analysis_id, "red_flags", "")
+        self._set(analysis_id, "recommendations", "")
         self._set(analysis_id, "summary", "")
 
         self.analysis_counter = u256(int(self.analysis_counter) + 1)
@@ -86,39 +96,64 @@ class LegalAnalyzer(gl.Contract):
             try:
                 response = gl.nondet.web.get(contract_url)
                 raw = response.body.decode("utf-8")
-                web_data = raw[:3000]
+                web_data = raw[:4000]
             except Exception:
                 web_data = "Could not fetch contract content."
 
-            prompt = f"""You are an AI legal analyst reviewing a contract between two parties.
-Your job is to identify risks, problematic clauses, and determine which party
-the contract favors based on the content provided.
+            prompt = f"""You are a senior legal analyst specializing in contract law.
+Your task is to perform a structured multi-category risk analysis on the contract below.
 
 Contract Title: {title}
 Party A: {party_a}
 Party B: {party_b}
-
-Analysis Focus: {analysis_focus}
+User-defined analysis focus: {analysis_focus}
 
 Contract content from {contract_url}:
 {web_data}
 
-Analyze the contract and identify the following:
-1. Overall risk level for both parties
-2. Which party the contract favors more
-3. Any red flags or problematic clauses
-4. A brief summary of the key terms
+Perform a structured analysis evaluating each of these four categories independently.
+
+CATEGORY 1 - FINANCIAL TERMS
+Look for: payment schedules, late payment penalties, currency clauses, escalation rights,
+hidden fees, refund obligations, and price modification rights.
+Question: Are the financial terms balanced or do they expose one party to disproportionate financial risk?
+
+CATEGORY 2 - LIABILITY AND INDEMNIFICATION
+Look for: liability caps, indemnification clauses, warranty disclaimers, exclusions of damages,
+force majeure provisions, and insurance requirements.
+Question: Does either party bear unlimited or unfair liability exposure?
+
+CATEGORY 3 - INTELLECTUAL PROPERTY RIGHTS
+Look for: ownership of work product, license grants, copyleft requirements, derivative works,
+patent obligations, confidentiality clauses, and trademark usage.
+Question: Are IP rights clearly assigned and do they restrict either party unreasonably?
+
+CATEGORY 4 - TERMINATION AND DISPUTE RESOLUTION
+Look for: termination conditions, notice periods, post-termination obligations, dispute resolution
+mechanisms, governing law, and jurisdiction clauses.
+Question: Can either party exit the agreement fairly and how are disputes handled?
+
+For each category assign a risk score using these criteria:
+LOW means the clauses are balanced and standard for this type of agreement.
+MEDIUM means there are some unusual clauses that warrant attention but are not deal-breakers.
+HIGH means there are clauses that expose one party to significant or disproportionate risk.
 
 Respond ONLY with this JSON:
 {{
-  "risk_level": "LOW",
+  "risk_level": "MEDIUM",
   "favorable_for": "Party A",
-  "red_flags": "one sentence describing the main risk or problematic clause found",
-  "summary": "two sentences summarizing the key terms and overall balance of the contract"
+  "financial_risk": "LOW",
+  "liability_risk": "MEDIUM",
+  "ip_risk": "HIGH",
+  "termination_risk": "LOW",
+  "red_flags": "one sentence describing the single most critical issue across all categories",
+  "recommendations": "one sentence describing the most important change to negotiate",
+  "summary": "two sentences summarizing the overall balance and main concerns"
 }}
 
-risk_level must be exactly LOW, MEDIUM, or HIGH.
+risk_level is the overall risk and must be exactly LOW, MEDIUM, or HIGH.
 favorable_for must be exactly Party A, Party B, or Balanced.
+Each category risk must be exactly LOW, MEDIUM, or HIGH.
 No extra text."""
 
             result = gl.nondet.exec_prompt(prompt)
@@ -127,18 +162,37 @@ No extra text."""
 
             risk_level = data.get("risk_level", "MEDIUM")
             favorable_for = data.get("favorable_for", "Balanced")
+            financial_risk = data.get("financial_risk", "MEDIUM")
+            liability_risk = data.get("liability_risk", "MEDIUM")
+            ip_risk = data.get("ip_risk", "MEDIUM")
+            termination_risk = data.get("termination_risk", "MEDIUM")
             red_flags = data.get("red_flags", "")
+            recommendations = data.get("recommendations", "")
             summary = data.get("summary", "")
 
-            if risk_level not in ("LOW", "MEDIUM", "HIGH"):
+            valid_risks = ("LOW", "MEDIUM", "HIGH")
+            if risk_level not in valid_risks:
                 risk_level = "MEDIUM"
+            if financial_risk not in valid_risks:
+                financial_risk = "MEDIUM"
+            if liability_risk not in valid_risks:
+                liability_risk = "MEDIUM"
+            if ip_risk not in valid_risks:
+                ip_risk = "MEDIUM"
+            if termination_risk not in valid_risks:
+                termination_risk = "MEDIUM"
             if favorable_for not in ("Party A", "Party B", "Balanced"):
                 favorable_for = "Balanced"
 
             return json.dumps({
                 "risk_level": risk_level,
                 "favorable_for": favorable_for,
+                "financial_risk": financial_risk,
+                "liability_risk": liability_risk,
+                "ip_risk": ip_risk,
+                "termination_risk": termination_risk,
                 "red_flags": red_flags,
+                "recommendations": recommendations,
                 "summary": summary
             }, sort_keys=True)
 
@@ -160,23 +214,28 @@ No extra text."""
         raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
         data = json.loads(raw)
 
-        risk_level = data["risk_level"]
-        favorable_for = data["favorable_for"]
-        red_flags = data["red_flags"]
-        summary = data["summary"]
-
         self._set(analysis_id, "status", "analyzed")
-        self._set(analysis_id, "risk_level", risk_level)
-        self._set(analysis_id, "favorable_for", favorable_for)
-        self._set(analysis_id, "red_flags", red_flags)
-        self._set(analysis_id, "summary", summary)
+        self._set(analysis_id, "risk_level", data["risk_level"])
+        self._set(analysis_id, "favorable_for", data["favorable_for"])
+        self._set(analysis_id, "financial_risk", data["financial_risk"])
+        self._set(analysis_id, "liability_risk", data["liability_risk"])
+        self._set(analysis_id, "ip_risk", data["ip_risk"])
+        self._set(analysis_id, "termination_risk", data["termination_risk"])
+        self._set(analysis_id, "red_flags", data["red_flags"])
+        self._set(analysis_id, "recommendations", data["recommendations"])
+        self._set(analysis_id, "summary", data["summary"])
 
         return (
             f"Analysis {analysis_id} complete. "
-            f"Risk Level: {risk_level}. "
-            f"Favorable for: {favorable_for}. "
-            f"Red Flags: {red_flags}. "
-            f"{summary}"
+            f"Overall Risk: {data['risk_level']}. "
+            f"Favorable for: {data['favorable_for']}. "
+            f"Financial: {data['financial_risk']} | "
+            f"Liability: {data['liability_risk']} | "
+            f"IP: {data['ip_risk']} | "
+            f"Termination: {data['termination_risk']}. "
+            f"Red Flags: {data['red_flags']}. "
+            f"Recommendations: {data['recommendations']}. "
+            f"{data['summary']}"
         )
 
     def _get(self, analysis_id: str, field: str) -> str:
@@ -193,4 +252,3 @@ No extra text."""
                 self.analysis_data[i] = f"{key}{value}"
                 return
         self.analysis_data.append(f"{key}{value}")
-    
